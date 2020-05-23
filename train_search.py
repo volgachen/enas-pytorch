@@ -19,7 +19,7 @@ from micro_controller import Controller
 
 
 parser = argparse.ArgumentParser("cifar")
-parser.add_argument('--data', type=str, default='../data/cifar10', help='location of the data corpus')
+parser.add_argument('--data', type=str, default='/home/yszhu3/.torch/cifar10.python', help='location of the data corpus')
 parser.add_argument('--batch_size', type=int, default=160, help='batch size')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
