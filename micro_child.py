@@ -40,16 +40,19 @@ class CNN(nn.Module):
     def _compile_model(self):
         out_filters = self.out_filters
         in_filters = [out_filters*3, out_filters*3]
+        sizes = [1, 1]
         self.add_module('layer', nn.ModuleList())
         for layer_id in range(self.num_layers+2):
             self.layer.append(nn.Module())
             if layer_id not in self.pool_layers:
-                self._compile_layer(self.layer[layer_id], layer_id, in_filters, out_filters)
+                self._compile_layer(self.layer[layer_id], layer_id, in_filters, out_filters, sizes)
             else:
                 out_filters *= 2
-                self._compile_reduction(self.layer[layer_id], in_filters, out_filters)
+                self._compile_reduction(self.layer[layer_id], in_filters[-1], out_filters)
                 in_filters = [in_filters[-1], out_filters]
-                self._compile_layer(self.layer[layer_id], layer_id, in_filters, out_filters)
+                sizes = [sizes[-1], sizes[-1] * 2]
+                self._compile_layer(self.layer[layer_id], layer_id, in_filters, out_filters, sizes)
+                sizes = [sizes[-1], sizes[-1] * 2]
             in_filters = [in_filters[-1], out_filters]
 
             if self.use_aux_heads and layer_id in self.aux_head_indices:
@@ -70,8 +73,8 @@ class CNN(nn.Module):
 
         self.add_module('final_fc', nn.Linear(out_filters, 10))
 
-    def _compile_layer(self, module, layer_id, in_filters, out_filters):
-        self._compile_calibrate(module, in_filters, out_filters)
+    def _compile_layer(self, module, layer_id, in_filters, out_filters, sizes):
+        self._compile_calibrate(module, in_filters, out_filters, sizes)
         module.add_module('cell', nn.ModuleList())
         for cell_id in range(self.num_cells):
             module.cell.append(nn.ModuleList())
@@ -106,12 +109,12 @@ class CNN(nn.Module):
                 nn.BatchNorm2d(out_filters, track_running_stats=False),
             ))
 
-    def _compile_calibrate(self, module, in_filters, out_filters):
+    def _compile_calibrate(self, module, in_filters, out_filters, sizes):
         module.add_module('calibrate', nn.Module())
-        # TODO: Not sure
-        if in_filters[0] * 2 == in_filters[1]:
-            self._compile_reduction(module.calibrate, in_filters, out_filters)
-        if in_filters[0] != out_filters:
+        #zychen rewrite
+        if sizes[0] * 2 == sizes[1]:
+            self._compile_reduction(module.calibrate, in_filters[0], out_filters)
+        elif in_filters[0] != out_filters:
             module.calibrate.add_module('pool_x', nn.Sequential(
                 nn.ReLU(),
                 nn.Conv2d(in_filters[0], out_filters, kernel_size=1, padding=0, bias=False),
@@ -124,17 +127,17 @@ class CNN(nn.Module):
                 nn.BatchNorm2d(out_filters, track_running_stats=False),
             ))
 
-    def _compile_reduction(self, module, in_filters, out_filters):
+    def _compile_reduction(self, module, in_filter, out_filters):
         module.add_module('reduction', nn.Module())
         # TODO: path_conv?
         module.reduction.add_module('path1_conv', nn.Sequential(
             nn.AvgPool2d(kernel_size=1, stride=2, padding=0),
-            nn.Conv2d(in_filters[0], out_filters//2, kernel_size=1, padding=0, bias=False),
+            nn.Conv2d(in_filter, out_filters//2, kernel_size=1, padding=0, bias=False),
         ))
         module.reduction.add_module('padding', nn.ZeroPad2d((0,1,0,1)))
         module.reduction.add_module('path2_conv', nn.Sequential(
             nn.AvgPool2d(kernel_size=1, stride=2, padding=0),
-            nn.Conv2d(in_filters[0], out_filters//2, kernel_size=1, padding=0, bias=False),
+            nn.Conv2d(in_filter, out_filters//2, kernel_size=1, padding=0, bias=False),
         ))
         module.reduction.add_module('bn', nn.BatchNorm2d(out_filters, track_running_stats=False))
 
