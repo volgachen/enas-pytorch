@@ -17,6 +17,9 @@ from torch.autograd import Variable
 from micro_child import CNN
 from micro_controller import Controller
 
+#zychen
+from param_loss import ParamCalculation
+
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--data', type=str, default='/home/yszhu3/.torch/cifar10.python', help='location of the data corpus')
@@ -51,6 +54,10 @@ parser.add_argument('--temperature', type=float, default=5.0)
 
 parser.add_argument('--entropy_weight', type=float, default=0.0001)
 parser.add_argument('--bl_dec', type=float, default=0.99)
+
+#zychen
+parser.add_argument('--param_weight', type=float, default=0.1)
+parser.add_argument('--param_target', type=float, default=6)
 
 args = parser.parse_args()
 
@@ -109,6 +116,9 @@ def main():
 
     scheduler = utils.LRScheduler(optimizer, args)
 
+    # zychen
+    param_calculator = ParamCalculation(args.param_target)
+
     for epoch in range(args.epochs):
         lr = scheduler.update(epoch)
         logging.info('epoch %d lr %e', epoch, lr)
@@ -117,10 +127,10 @@ def main():
         train_acc = train(train_loader, model, controller, optimizer)
         logging.info('train_acc %f', train_acc)
 
-        train_controller(reward_loader, model, controller, controller_optimizer)
+        train_controller(reward_loader, model, controller, controller_optimizer, param_calculator)
 
         # validation
-        valid_acc = infer(valid_loader, model, controller)
+        valid_acc = infer(valid_loader, model, controller, param_calculator)
         logging.info('valid_acc %f', valid_acc)
 
         utils.save(model, os.path.join(args.save, 'weights.pt'))
@@ -157,7 +167,7 @@ def train(train_loader, model, controller, optimizer):
 
     return total_top1.avg
 
-def train_controller(reward_loader, model, controller, controller_optimizer):
+def train_controller(reward_loader, model, controller, controller_optimizer, param_calculator):
     global baseline
     total_loss = utils.AvgrageMeter()
     total_reward = utils.AvgrageMeter()
@@ -184,6 +194,10 @@ def train_controller(reward_loader, model, controller, controller_optimizer):
         if args.entropy_weight is not None:
             reward += args.entropy_weight*entropy
 
+        # zycehn
+        if args.param_weight is not None:
+            reward += args.param_weight * param_calculator.getLoss(dag)
+
         log_prob = torch.sum(log_prob)
         if baseline is None:
             baseline = reward
@@ -207,7 +221,7 @@ def train_controller(reward_loader, model, controller, controller_optimizer):
             #tensorboard.add_scalar('controller/reward', reward, epoch)
             #tensorboard.add_scalar('controller/entropy', entropy, epoch)
 
-def infer(valid_loader, model, controller):
+def infer(valid_loader, model, controller, param_calculator):
     total_loss = utils.AvgrageMeter()
     total_top1 = utils.AvgrageMeter()
     model.eval()
@@ -230,9 +244,10 @@ def infer(valid_loader, model, controller):
             total_top1.update(prec1.item(), n)
 
             #if step % args.report_freq == 0:
-            logging.info('valid %03d %e %f', step, loss.item(), prec1.item())
+            logging.info('valid %03d Loss: %e Acc: %f', step, loss.item(), prec1.item())
             logging.info('normal cell %s', str(dag[0]))
             logging.info('reduce cell %s', str(dag[1]))
+            logging.info('Params: %.3f MB', param_calculator.checkparam(dag) * 4.0 / 1024 / 1024)
 
     return total_top1.avg
 
